@@ -68,6 +68,16 @@ rna.mtx <- seRNA.tmp2@assays$RNA$counts
 ### Generate ranged summarized object
 seRNA.GR <- SummarizedExperiment(rna.mtx,rowRanges=GR.reduce)
 
+### Add Annotation，AnnotationPts from seurat object to the ArchR project
+projMulti1 <- addCellColData(ArchRProj = projMulti1, 
+                             data = seRNA$Annotation[projMulti1$cellNames],
+                             cells = projMulti1$cellNames, 
+                             name = "Annotation",force = TRUE)
+projMulti1 <- addCellColData(ArchRProj = projMulti1, 
+                             data = seRNA$AnnotationPts[projMulti1$cellNames],
+                             cells = projMulti1$cellNames, 
+                             name = "AnnotationPts",force = TRUE)
+
 ### Double check
 length(which(getCellNames(projMulti1) %ni% colnames(seRNA.GR)))
 ### Select cells
