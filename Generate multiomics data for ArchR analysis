@@ -1,0 +1,92 @@
+### Import R packages
+suppressPackageStartupMessages(library(ArchR))
+suppressPackageStartupMessages(library(Seurat))
+library(GenomicRanges)
+addArchRGenome("hg38")
+addArchRThreads(4)
+set.seed(1)
+
+### Import Histone modification data
+input1 = "/gpfs/commons/groups/zhu_lab/xliu/project/yf_paired_seq_brain/analysis/20240424selectIntegrate_tumor_normal/20241101ArchR/fragmentpp/out/P1normal_fragment.txt.gz"
+input2 = "/gpfs/commons/groups/zhu_lab/xliu/project/yf_paired_seq_brain/analysis/20240424selectIntegrate_tumor_normal/20241101ArchR/fragmentpp/out/P1tumor_fragment.txt.gz"
+input3 = "/gpfs/commons/groups/zhu_lab/xliu/project/yf_paired_seq_brain/analysis/20240424selectIntegrate_tumor_normal/20241101ArchR/fragmentpp/out/P2normal_fragment.txt.gz"
+input4 = "/gpfs/commons/groups/zhu_lab/xliu/project/yf_paired_seq_brain/analysis/20240424selectIntegrate_tumor_normal/20241101ArchR/fragmentpp/out/P2tumor_fragment.txt.gz"
+input5 = "/gpfs/commons/groups/zhu_lab/xliu/project/yf_paired_seq_brain/analysis/20240424selectIntegrate_tumor_normal/20241101ArchR/fragmentpp/out/P3normal_fragment.txt.gz"
+input6 = "/gpfs/commons/groups/zhu_lab/xliu/project/yf_paired_seq_brain/analysis/20240424selectIntegrate_tumor_normal/20241101ArchR/fragmentpp/out/P3tumor_fragment.txt.gz"
+input = c(input1,input2,input3,input4,input5,input6)
+sname = c("P1_Normal","P1_Tumor","P2_Normal","P2_Tumor","P3_Normal","P3_Tumor")
+
+### Generate arrow files
+ArrowFiles <- createArrowFiles(
+    inputFiles = input,
+    sampleNames = sname,
+    filterTSS = 0,
+    filterFrags = 0,
+    addTileMat = TRUE,
+    addGeneScoreMat = TRUE)
+
+### Generate ArchR project
+projMulti1 <- ArchRProject(ArrowFiles = ArrowFiles)
+
+### Save ArchR project
+saveArchRProject(ArchRProj = projMulti1, outputDirectory = "./project1", load = FALSE)
+
+### Load ArchR project
+projMulti1 <- loadArchRProject(path = "./project1")
+
+### Import RNA data from Seurat object
+dir1 = "/gpfs/commons/groups/zhu_lab/xliu/project/yf_paired_seq_brain/analysis/20240424selectIntegrate_tumor_normal/20240424_brain_NvsT_integrate_mergeraw.rds"
+seRNA <- readRDS(dir1)
+
+### Rename seRNA cell barcode, consistent with DNA data
+test <-c()
+for (i in 1:dim(seRNA)[2]){
+        test[i] <- gsub("(_)",":",colnames(seRNA)[i])
+}
+DNA_name <- paste0(seRNA$Pts,"_",seRNA$Tumor,"#",test)
+head(DNA_name)
+colnames(seRNA) <- DNA_name
+
+### Generate Granges object using features in Seurat object
+library(rnaEditr)
+GR <- TransformToGR(c(row.names(seRNA)),
+             type = c("symbol"),
+             genome = c("hg38"))
+
+### Combine ranges with the same gene symbol
+grl <- reduce(split(GR, elementMetadata(GR)$symbols))
+GR.reduce <- unlist(grl, use.names=FALSE)
+elementMetadata(GR.reduce)$symbols <- rep(names(grl),elementNROWS(grl))
+
+### Select features from Seurat object overlapping with GRanges
+seRNA.tmp1 <- subset(seRNA, features=GR.reduce$symbols) #18907 genes, 38890 cells
+
+### Select cells overlapping with DNA data
+seRNA.tmp2<- seRNA.tmp1[,projMulti1$cellNames] #20183 cells
+rna.mtx <- seRNA.tmp2@assays$RNA$counts
+
+### Generate ranged summarized object
+seRNA.GR <- SummarizedExperiment(rna.mtx,rowRanges=GR.reduce)
+
+### Double check
+length(which(getCellNames(projMulti1) %ni% colnames(seRNA.GR)))
+### Select cells
+cellsToKeep <- which(getCellNames(projMulti1) %in% colnames(seRNA.GR))
+
+### Generate ArchR project
+projMulti2 <- subsetArchRProject(ArchRProj = projMulti1, 
+                                 cells = getCellNames(projMulti1)[cellsToKeep], 
+                                 outputDirectory = "./project2",
+                                 force = TRUE,
+                                 dropCells=FALSE)
+
+### Combine DNA and RNA datasets
+projMulti3 <- addGeneExpressionMatrix(input = projMulti2, seRNA = seRNA.GR, strictMatch = TRUE, force = TRUE)
+
+### Save ArchR project
+saveArchRProject(ArchRProj = projMulti3, outputDirectory = "./project3", load = FALSE)
+
+### Load ArchR project
+projMulti3 <- loadArchRProject(path = "./project3")
+
+
